@@ -1,0 +1,204 @@
+---
+import { CollectionEntry, getCollection } from 'astro:content';
+import Layout from '../layouts/Layout.astro';
+import Navbar from '../components/Navbar.astro';
+import FormattedDate from '../components/FormattedDate.astro';
+
+// Get the slug from the URL
+const slug = Astro.url.pathname.split('/').filter(Boolean).pop();
+
+// Handle favicon.ico request and prevent it from breaking the page
+if (slug === 'favicon.ico') {
+  throw Astro.redirect('/');  // Redirect or handle the favicon case appropriately
+}
+
+// Fetch overlay collection data (local JSON files)
+const overlays = await getCollection('overlay');
+
+// Find the overlay that matches the current slug
+const overlay = overlays.find((item) => item.id === slug);
+
+if (!overlay) {
+  throw new Error(`Overlay with id ${slug} not found`);
+}
+---
+
+<Layout>
+  <Navbar search={true} path=".."/>
+  <main class="flex max-lg:flex-col w-[80vw] mx-auto">
+    <div class="w-1/3 max-lg:w-full flex justify-end max-lg:justify-center max-sm:w-full">
+      <div class="w-1/2 h-fit max-h-[40vh] bg-neutral-800 my-16 max-lg:my-4 rounded-xl text-white break-words p-4 max-sm:w-full">
+        <ul>
+          <li>
+            <p><span class="font-semibold">Name: </span>{overlay.data.name}</p>
+          </li>
+          <li>
+            <p><span class="font-semibold">Date published: </span><FormattedDate date={overlay.data.pubDate}></p>
+          </li>
+          <li>
+            {!overlay.data.author && <p><span class="font-semibold">Author: </span>Unknown</p>}
+            {overlay.data.author && <p><span class="font-semibold">Author: </span><a class="text-blue-600 dark:text-blue-500 hover:underline" href={overlay.data.author_link} target="_blank">{overlay.data.author}</a></p>}
+          </li>
+          {overlay.data.description && <li>
+            <p><span class="font-semibold">Description: </span>{overlay.data.description}</p>
+          </li>}
+        </ul>
+      </div>
+    </div>
+    <div class="w-1/3 max-lg:w-full flex flex-col items-center">
+      <div class="bg-neutral-800 w-fit h-fit mt-16 max-lg:mt-4 mb-4 rounded-md">
+        <astro-skin-renderer data-id={overlay.id}>
+          <canvas id="skin-preview" class="hover:cursor-move"></canvas>
+          <canvas id="skin-canvas" class="hidden w-72" style="image-rendering: pixelated;"></canvas>
+        </astro-skin-renderer>
+      </div>
+      <a id="download" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded transition">Download Skin</a>
+      <!-- "Go Back to Home" button -->
+      <a href="/" class="mt-4 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded transition">Go Back to Home</a>
+    </div>
+    <div class="w-1/3 max-lg:w-full">
+      <div class="w-fit max-lg:w-full h-fit bg-neutral-800 my-16 max-lg:my-8 rounded-xl text-white p-4 max-lg:mx-auto">
+        <section class="mb-8">
+          <h2 class="text-lg mb-2">Controls</h2>
+          <div class="mb-4">
+            <label for="fov-slider" class="block text-sm">FOV (70)</label>
+            <input type="range" id="fov-slider" class="w-full" min="20" max="125" step="1">
+          </div>
+        </section>
+    
+        <section class="mb-8">
+          <h2 class="text-lg mb-2">Animations</h2>
+          <div class="flex gap-4 mb-4">
+            <div class="flex items-center">
+              <input type="radio" id="none" name="animation" value="none" checked>
+              <label for="none" class="ml-2 text-sm">None</label>
+            </div>
+            <div class="flex items-center">
+              <input type="radio" id="idle" name="animation" value="idle">
+              <label for="idle" class="ml-2 text-sm">Idle</label>
+            </div>
+            <div class="flex items-center">
+              <input type="radio" id="walking" name="animation" value="walking">
+              <label for="walking" class="ml-2 text-sm">Walking</label>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>      
+  </main>
+</Layout>
+
+<script>
+import { SkinViewer, WalkingAnimation, IdleAnimation } from "skinview3d";
+
+// Define the custom class for rendering skins, including uploaded skins handling
+class SkinRenderer extends HTMLElement {
+  constructor() {
+    super();
+    const canvas = document.getElementById("skin-preview");
+    if (canvas == null) return;
+
+    this.skinViewer = new SkinViewer({
+      width: 300,
+      height: 500,
+      canvas: canvas,
+    });
+
+    this.skinViewer.camera.rotation.x = -0.1;
+    this.skinViewer.camera.rotation.y = 0.5;
+    this.skinViewer.camera.rotation.z = 0.05;
+    this.skinViewer.camera.position.x = 15;
+    this.skinViewer.camera.position.y = 3;
+    this.skinViewer.camera.position.z = 25;
+    this.skinViewer.fov = 70;
+    this.skinViewer.zoom = 0.7;
+
+    this.loadSkin();
+    controlsInit(this.skinViewer);
+  }
+
+  async loadSkin() {
+    let id = this.dataset.id;
+    const params = new URLSearchParams(window.location.search);
+    const uploadedSkin = params.get('uploaded');
+    const username = params.get("username") ?? "iishator";
+
+    let skinUrl = uploadedSkin ? `https://laced-heavy-brownie.glitch.me${uploadedSkin}` : `https://mc-heads.net/skin/${username}`;
+    
+    const image = await overlayImages(skinUrl, `../overlays/${id}.png`);
+    const link = document.getElementById('download');
+    link.href = image;
+    link.download = `${id}-overlay-skin.png`;
+
+    await this.skinViewer.loadSkin(image);
+  }
+}
+
+function overlayImages(backgroundImageUrl, overlayImageUrl) {
+  return new Promise((resolve, reject) => {
+    const canvas = document.getElementById("skin-canvas");
+    if (!canvas) return;
+
+    const backgroundImg = new Image();
+    backgroundImg.crossOrigin = "Anonymous";
+    backgroundImg.src = backgroundImageUrl;
+
+    const overlayImg = new Image();
+    overlayImg.crossOrigin = "Anonymous";
+    overlayImg.src = overlayImageUrl;
+
+    Promise.all([
+      new Promise((res) => (backgroundImg.onload = res)),
+      new Promise((res) => (overlayImg.onload = res)),
+    ]).then(() => {
+      canvas.width = backgroundImg.width;
+      canvas.height = backgroundImg.height;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.drawImage(backgroundImg, 0, 0);
+      ctx.drawImage(overlayImg, 0, 0, overlayImg.width, overlayImg.height);
+
+      const base64 = canvas.toDataURL("image/png");
+      resolve(base64);
+    });
+  });
+}
+
+// Initialize controls like FOV slider and animation
+function controlsInit(skinViewer) {
+  const animationRadios = document.querySelectorAll('input[name="animation"]');
+  const fovSlider = document.getElementById('fov-slider');
+
+  animationRadios.forEach((radio) => {
+    radio.addEventListener("click", function (event) {
+      const selectedAnimation = event.target.value;
+      switch (selectedAnimation) {
+        case "none":
+          skinViewer.animation = null;
+          break;
+        case "walking":
+          skinViewer.animation = new WalkingAnimation();
+          break;
+        case "idle":
+          skinViewer.animation = new IdleAnimation();
+          break;
+        default:
+          skinViewer.animation = null;
+          break;
+      }
+    });
+  });
+
+  fovSlider?.addEventListener("input", function (event) {
+    const fov = event.target.value;
+    const label = document.querySelector('label[for="fov-slider"]');
+    if (label) label.textContent = `FOV (${fov})`;
+    skinViewer.fov = fov;
+  });
+}
+
+// Define the custom element for rendering skins inside the page
+customElements.define("astro-skin-renderer", SkinRenderer);
+</script>

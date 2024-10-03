@@ -1,0 +1,120 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Card from '../components/Card.astro';
+import { getCollection } from 'astro:content';
+import NavBar from "../components/Navbar.astro";
+
+// Fetch and sort the overlays
+const overlays = (await getCollection('overlay')).sort(
+  (a, b) => a.data.pubDate.valueOf() - b.data.pubDate.valueOf()
+);
+
+// Pagination setup
+const params = Astro.url.searchParams;
+const currentPage = Number(params.get('page')) || 1;
+---
+
+
+
+<Layout title="Skin Overlays" path=".">
+  <NavBar search={true} path="."/>
+
+
+
+<!-- Non-sticky Username/Upload section -->
+<section class="w-full mb-4 mt-4 flex justify-between items-center gap-2 md:justify-center">
+  <!-- Username input on the left -->
+  <div class="relative w-full max-w-xs sm:max-w-xs md:max-w-lg">
+    <img src="public/Search.svg" alt="Search Icon" class="absolute left-3 top-1/2 transform -translate-y-1/2 w-6 h-6">
+    <input type="text" id="username" 
+      class="w-full focus:outline-none border-2 placeholder-input_brdr placeholder-font-bold border-input_brdr text-white font-light bg-Inpt_Bg rounded-lg pl-10 pr-2 py-3" 
+      placeholder="Minecraft User" 
+      onfocusout="updateURL()">
+  </div>
+      
+  <!-- Upload Skin Button on the right -->
+  <label for="skin-upload" style="box-shadow: inset 0 -4px 0 0 #5A98C1;" class="max-w-xs sm:max-w-xs md:max-w-lg w-full text-center font-semibold text-17px text-BKG bg-[#86CEFF] rounded-lg cursor-pointer inner-border-4 border-b-Strk_btn box-border transition-all px-4 py-3">
+    Upload Skin
+  </label>
+  <input type="file" id="skin-upload" accept=".png" class="hidden" />
+</section>
+
+<!-- Sticky Canvas section -->
+<section id="skin-viewer-container" height="325" class="sticky top-2 z-50 px-3 w-full flex justify-center items-center flex-col bg-cover bg-center">
+  <!-- Sticky Canvas for SkinViewer -->
+  <div class="relative rounded-2xl border-2 border-opacity-50 border-gray-600 w-full flex justify-center" style="background-image: url('https://cdn.glitch.global/89fcef82-41a8-4a32-bcf5-f37756d28042/src%2Fpages%2FVector.png?v=1727032214749');">
+    <canvas id="main-skin-viewer" class="mx-1" width="300" height="325"></canvas>  
+    
+    <!-- Download Button at Bottom-Right -->
+    <button id="download-skin-btn" style="box-shadow: inset 0 -3px 0 0 #5A98C1;" class="absolute bottom-2 right-2 bg-Btn_Main text-white font-bold rounded-md flex items-center justify-center">
+      <img src="/public/download-icon.svg" alt="Download Icon" class="w-38 h-38 m-1" />
+    </button>
+  </div>
+</section>
+
+
+  
+  
+
+  <!-- Container for filter buttons -->
+  <div class="flex justify-center space-x-4 my-6">
+    <button class="filter-btn" data-focus="all">All</button>
+    <button class="filter-btn" data-focus="head">Head</button>
+    <button class="filter-btn" data-focus="body">Body</button>
+    <button class="filter-btn" data-focus="back">Back</button>
+    <button class="filter-btn" data-focus="legs">Legs</button>
+    <button class="filter-btn" data-focus="feet">Feet</button>
+  </div>
+
+  <main>
+    <!-- List of cards -->
+    <ul class="flex flex-wrap justify-center gap-1 w-80vw mx-auto my-3">
+      {overlays.map((overlay) => (
+        <Card name={overlay.data.name} id={overlay.id} current-page={currentPage}></Card>
+      ))}
+    </ul>
+
+    <!-- Pagination controls (HTML only) -->
+    <div class="pagination-controls flex justify-center mt-8" id="pagination-container"></div>
+  </main>
+</Layout>
+
+<!-- JavaScript to handle username input and updating the URL -->
+<script>
+  const usernameInput = document.getElementById('username');
+
+  usernameInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      updateURL()
+    }
+  });
+
+  function updateURL(){
+    if(usernameInput.value.length < 1) return;
+    window.location.href = `?username=${usernameInput.value}`
+  }
+</script>
+
+<style>
+  /* Styling for pagination buttons */
+  .pagination-btn {
+    cursor: pointer;
+    transition: background-color 0.3s;
+    margin: 0 5px;
+    padding: 8px 16px;
+    border-radius: 5px;
+    background-color: #e0e0e0;
+  }
+
+  .pagination-btn.active {
+    background-color: #007bff;
+    color: white;
+  }
+
+  .pagination-btn:hover {
+    background-color: #007bff;
+    color: white;
+
+
+  }
+</style>

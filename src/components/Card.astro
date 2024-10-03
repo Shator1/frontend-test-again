@@ -1,0 +1,522 @@
+---
+import { getCollection } from 'astro:content';
+
+// Fetch the overlay collection data (JSON files)
+const overlays = await getCollection('overlay');
+
+// Define props passed into the component (name and id of the overlay)
+interface Props {
+  name: string;
+  id: string;  // This should match the name of the overlay (without the .png extension)
+}
+
+const { name, id } = Astro.props;
+
+// Find the JSON data for the current overlay
+const currentOverlay = overlays.find((overlay) => overlay.id === id);
+const focus = currentOverlay && currentOverlay.data.focus ? currentOverlay.data.focus : 'full';  // Get the focus from the JSON file or default to 'full'
+---
+
+<!-- Card representing an overlay with its focus -->
+<div class="w-[132px] h-[132px] my-2 relative overflow-hidden rounded-lg shadow-lg group bg-gradient-to-tr from-stone-900 from-0% to-neutral-800 overlay-card" data-overlay-id={id} data-focus={focus}>
+  <!-- Gradient overlay stays static -->
+  <div class="absolute inset-0 bg-gradient-to-b from-transparent to-black opacity-70 pointer-events-none"></div>
+  
+  <!-- Set data-overlay-id dynamically based on the current overlay -->
+  <a href={`/skin-overlay/${id}`} id={`${id}-lnk`} data-overlay-id={id}>
+    <astro-render class="w-full h-full bg-cover bg-center block lazyload" id={id} data-id={id}></astro-render>
+  </a>
+
+  <!-- Name and button, visible without animation -->
+  <div class="absolute w-full bottom-0 left-0 p-2 text-white flex justify-between">
+    <h3 class="text-sm font-semibold cursor-default truncate">{name}</h3>
+    <a class="w-4 h-4 place-self-center hover:text-stone-400 hover:cursor-pointer" id={`${id}-btn`}>
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      </svg>
+    </a>
+  </div>
+</div>
+
+<script>
+// Lazy-load the skinview3d library when needed
+async function lazyLoadSkinViewer() {
+  // Dynamically import skinview3d only when it's required
+  const { SkinViewer } = await import('skinview3d');
+  
+  // Proceed with initializing the SkinViewer or any logic that depends on it
+  return SkinViewer;
+}
+
+// Variables
+const pageSize = 9;  // Max cards per page
+
+// Function to update the overlays shown on the page (dynamically based on category and page)
+function updateOverlays(category, pageNumber) {
+  const cards = document.querySelectorAll('.overlay-card');
+  let filteredCards = Array.from(cards);
+
+  // Filter cards by category
+  if (category !== 'all') {
+    filteredCards = filteredCards.filter(card => card.getAttribute('data-focus') === category);
+  }
+
+  // Pagination logic
+  const totalCards = filteredCards.length;
+  const totalPages = Math.ceil(totalCards / pageSize);
+  const start = (pageNumber - 1) * pageSize;
+  const end = start + pageSize;
+
+  // Show only the cards for the current page
+  cards.forEach(card => card.style.display = 'none');  // Hide all cards
+  filteredCards.slice(start, end).forEach(card => card.style.display = 'block');  // Show paginated cards
+
+  // Update pagination controls
+  updatePaginationControls(totalPages, pageNumber, category);
+}
+
+// Function to update pagination controls dynamically
+function updatePaginationControls(totalPages, currentPage, category) {
+  const paginationContainer = document.getElementById('pagination-container');
+  paginationContainer.innerHTML = '';  // Clear previous buttons
+
+  for (let i = 1; i <= totalPages; i++) {
+    const button = document.createElement('button');
+    button.classList.add('pagination-btn');
+    button.innerText = i;
+    if (i === currentPage) button.classList.add('active');
+    
+    button.addEventListener('click', () => {
+      // Update URL without refreshing the page
+      const params = new URLSearchParams(window.location.search);
+      const uploadedSkin = params.get('uploaded');
+      const username = params.get('username') ?? 'iiShator';
+      const skinPath = uploadedSkin ? `uploaded=${uploadedSkin}` : `username=${username}`;
+      const newUrl = `${window.location.origin}${window.location.pathname}?${skinPath}&category=${category}&page=${i}`;
+      window.history.pushState({ path: newUrl }, '', newUrl);
+      
+      // Update overlays for the selected page
+      updateOverlays(category, i);
+    });
+
+    paginationContainer.appendChild(button);
+  }
+}
+
+// Handle category filtering without page refresh
+document.querySelectorAll('.filter-btn').forEach(button => {
+  button.addEventListener('click', function () {
+    const category = this.getAttribute('data-focus');
+    
+    // Update URL and reset to page 1 for the new category
+    const params = new URLSearchParams(window.location.search);
+    const uploadedSkin = params.get('uploaded');
+    const username = params.get('username') ?? 'iiShator';
+    const skinPath = uploadedSkin ? `uploaded=${uploadedSkin}` : `username=${username}`;
+    const newUrl = `${window.location.origin}${window.location.pathname}?${skinPath}&category=${category}&page=1`;
+    window.history.pushState({ path: newUrl }, '', newUrl);
+
+    // Immediately update the cards and pagination for the selected category (show page 1)
+    updateOverlays(category, 1);
+  });
+});
+
+// On initial load, get current page and category from URL and display the correct overlays
+window.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(window.location.search);
+  const category = params.get('category') || 'all';
+  const page = Number(params.get('page')) || 1;
+
+  updateOverlays(category, page);
+});
+
+// Lazy-load and initialize the SkinViewer when a card is interacted with
+let mainSkinViewer;
+let currentOverlayId = null;  // Track which overlay is currently applied
+
+// Function to log debug messages for camera focus
+function debugFocus(message) {
+  console.log(`[DEBUG] Camera focus: ${message}`);
+}
+
+// Define a custom class for rendering skins inside each card
+class SkinRenderer extends HTMLElement {
+  constructor() {
+    super();
+    this.init();  // Initialize the skin viewer
+  }
+
+  async init() {
+    const elem = document.getElementById(this.dataset.id || '');
+    if (elem == null) return;
+
+    const overlayId = this.dataset.id;
+
+    // Lazy-load the skinview3d library before proceeding
+    const SkinViewer = await lazyLoadSkinViewer();
+
+    // First check if we have a cached image on the server for this overlay
+    this.checkCachedImage(overlayId, elem)
+      .then((isCached) => {
+        if (!isCached) {
+          // If the image is not cached, proceed to render and upload
+          this.fetchFocusFromBackend(overlayId)
+            .then((focus) => {
+              this.renderAndUploadSkin(SkinViewer, overlayId, elem, focus);
+            })
+            .catch((err) => {
+              console.error(`Error fetching focus from backend for overlayId: ${overlayId}: ${err}`);
+              this.renderAndUploadSkin(SkinViewer, overlayId, elem, 'full');  // Default to 'full' if error
+            });
+        }
+      })
+      .catch((err) => console.error(`Error checking cache for overlayId: ${overlayId}: ${err}`));
+
+    // Initialize the main SkinViewer on page load
+    this.initMainSkinViewer(SkinViewer);
+
+    // Setup event listeners for clicking on cards to apply overlay
+    this.setupCardListeners();
+  }
+
+  // Check if the cached image exists on the backend
+  async checkCachedImage(overlayId, elem) {
+    const response = await fetch('https://laced-heavy-brownie.glitch.me/cache-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ overlayId })
+    });
+    const data = await response.json();
+    if (data.cached) {
+      // If cached, directly apply the cached image
+      elem.style.backgroundImage = `url(https://laced-heavy-brownie.glitch.me${data.url})`;
+      return true;  // Return true indicating cached image was found
+    } else {
+      return false;  // No cached image found
+    }
+  }
+
+  // Fetch the focus from backend JSON
+  async fetchFocusFromBackend(overlayId) {
+    const response = await fetch(`https://laced-heavy-brownie.glitch.me/overlay/${overlayId}.json`);
+    if (!response.ok) throw new Error('Failed to fetch focus data');
+    const json = await response.json();
+    return json.focus || 'full';  // Default to 'full' if no focus is specified
+  }
+
+  // Function to render and upload the skin based on focus
+  async renderAndUploadSkin(SkinViewer, overlayId, elem, focus) {
+    debugFocus(focus);  // Log the focus value
+
+    // Create the SkinViewer instance for WebGL rendering
+    const skinViewer = new SkinViewer({
+      width: 224,
+      height: 256,
+      renderPaused: true  // Render the skin only once
+    });
+
+    // Adjust the camera for the focus based on the backend JSON
+    this.adjustCameraForFocus(skinViewer, focus);
+
+    // Load the skin, overlay it, and render it
+    await this.loadSkin(skinViewer, overlayId);
+
+    skinViewer.render();  // Render the skin into the WebGL context
+    const image = await this.compressImage(skinViewer.canvas, 50 * 1024); // Compress to 50KB max
+
+    // Apply the rendered image as the background of the card
+    elem.style.backgroundImage = `url(${image})`;
+
+    // Upload the rendered image to the backend
+    const uploadedImageUrl = await this.uploadRenderedImage(image, overlayId);
+    if (uploadedImageUrl) {
+      elem.style.backgroundImage = `url(${uploadedImageUrl})`;
+    }
+  }
+
+  // Adjust the camera based on the focus value fetched from the backend
+  adjustCameraForFocus(skinViewer, focus) {
+    debugFocus(focus || "full");  // Log the focus value for debugging
+    switch (focus) {
+      case 'head':
+        skinViewer.camera.position.set(0, 3, 20);  // Closer to the head
+        skinViewer.camera.rotation.set(0, 0, 0);
+        skinViewer.fov = 40;
+        break;
+      case 'body':
+        skinViewer.camera.position.set(0, 10, 30);  // Zoomed to the body
+        skinViewer.camera.rotation.set(0, 0, 0);
+        skinViewer.fov = 50;
+        break;
+      case 'legs':
+        skinViewer.camera.position.set(0, -10, 35);  // Focus on legs
+        skinViewer.camera.rotation.set(0, 0, 0);
+        skinViewer.fov = 50;
+        break;
+      case 'back':
+        skinViewer.camera.position.set(0, 0, 30);  // Zoomed out for the back
+        skinViewer.camera.rotation.set(0, Math.PI, 0);  // Rotate to see back
+        skinViewer.fov = 50;
+        break;
+      default:
+        skinViewer.camera.position.set(0, 0, 40);  // Default full-body view
+        skinViewer.camera.rotation.set(0, 0, 0);
+        skinViewer.fov = 70;
+    }
+  }
+
+  async loadSkin(skinViewer, overlayId) {
+    const params = new URLSearchParams(window.location.search);
+    const uploadedSkin = params.get('uploaded');
+    const username = params.get('username') ?? 'iiShator';  // Default username
+
+    let skinUrl = uploadedSkin ? `https://laced-heavy-brownie.glitch.me${uploadedSkin}` : `https://mc-heads.net/skin/${username}`;
+    const overlayImageUrl = `./overlays/${overlayId}.png`;
+
+    const image = await overlayImages(skinUrl, overlayImageUrl);
+    await skinViewer.loadSkin(image);
+  }
+
+  async uploadRenderedImage(imageDataUrl, overlayId) {
+    const formData = new FormData();
+    formData.append('overlayId', overlayId);
+    formData.append('image', dataURLtoBlob(imageDataUrl), `skin-${overlayId}.png`);
+
+    const response = await fetch('https://laced-heavy-brownie.glitch.me/upload-cache', {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await response.json();
+    return data.url ? `https://laced-heavy-brownie.glitch.me${data.url}` : null;
+  }
+
+  initMainSkinViewer(SkinViewer) {
+    const mainViewerElem = document.getElementById("main-skin-viewer");
+    if (!mainViewerElem) return;
+
+    mainSkinViewer = new SkinViewer({
+      canvas: mainViewerElem,
+      width: 300,
+      height: 325,
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const uploadedSkin = params.get('uploaded');
+    const username = params.get('username') ?? 'iiShator';
+
+    if (uploadedSkin) {
+      mainSkinViewer.loadSkin(`https://laced-heavy-brownie.glitch.me${uploadedSkin}`);
+    } else {
+      mainSkinViewer.loadSkin(`https://mc-heads.net/skin/${username}`);
+    }
+
+    mainSkinViewer.camera.position.z = 40;  // Adjust zoom level
+    mainSkinViewer.controls.enableZoom = false;  // Disable zoom
+    mainSkinViewer.fov = 50;
+
+    mainSkinViewer.render();
+  }
+
+  setupCardListeners() {
+    const cards = document.querySelectorAll("a[data-overlay-id]");
+    cards.forEach((card) => {
+      card.addEventListener("click", (event) => {
+        event.preventDefault();  // Prevent the default action of the link
+        const overlayId = card.getAttribute('data-overlay-id');
+        currentOverlayId = overlayId;
+        applyOverlay(overlayId);  // Apply the overlay to the main viewer
+      });
+    });
+  }
+
+  async handleFileUpload(event) {
+    const file = event.target.files[0];
+
+    if (file.size > 20 * 1024) {
+      alert('File size exceeds 20KB limit.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('skin', file);
+
+    const response = await fetch('https://laced-heavy-brownie.glitch.me/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (data.url) {
+      const skinUrl = `https://laced-heavy-brownie.glitch.me${data.url}`;
+      mainSkinViewer.loadSkin(skinUrl);
+
+      const newUrl = `${window.location.origin}${window.location.pathname}?uploaded=${data.url}`;
+      window.history.pushState({ path: newUrl }, '', newUrl);
+    }
+  }
+
+  async compressImage(canvas, targetSize) {
+    let quality = 0.5;
+
+    return new Promise((resolve) => {
+      const compressLoop = () => {
+        canvas.toBlob((blob) => {
+          if (blob.size <= targetSize || quality <= 0.1) {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          } else {
+            quality -= 0.1;
+            compressLoop();
+          }
+        }, 'image/png', quality);
+      };
+      compressLoop();
+    });
+  }
+}
+
+// Filter cards based on focus when filter buttons are clicked
+document.querySelectorAll('.filter-btn').forEach(button => {
+  button.addEventListener('click', function() {
+    const focusFilter = this.getAttribute('data-focus');
+    document.querySelectorAll('.overlay-card').forEach(card => {
+      const cardFocus = card.getAttribute('data-focus');
+      if (focusFilter === 'all' || focusFilter === cardFocus) {
+        card.style.display = 'block';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    // Update URL without reloading the page
+    const params = new URLSearchParams(window.location.search);
+    const uploadedSkin = params.get('uploaded');
+    const username = params.get('username') ?? 'iiShator';
+    const skinPath = uploadedSkin ? `uploaded=${uploadedSkin}` : `username=${username}`;
+    
+    // Set the new URL without refreshing the page
+    const newUrl = `${window.location.origin}${window.location.pathname}?${skinPath}&category=${focusFilter}&page=1`;
+    window.history.pushState({ path: newUrl }, '', newUrl);
+  });
+});
+
+// Apply the overlay to the main viewer
+function applyOverlay(overlayId) {
+  const params = new URLSearchParams(window.location.search);
+  const uploadedSkin = params.get('uploaded');
+  const username = params.get('username') ?? 'iiShator';
+
+  let baseSkinUrl = uploadedSkin ? `https://laced-heavy-brownie.glitch.me${uploadedSkin}` : `https://mc-heads.net/skin/${username}`;
+
+  const overlayUrl = `./overlays/${overlayId}.png`;
+  overlayImages(baseSkinUrl, overlayUrl).then((resultingSkin) => {
+    mainSkinViewer.loadSkin(resultingSkin);
+  });
+}
+
+// Download the current skin with the overlay applied
+document.getElementById('download-skin-btn')?.addEventListener('click', () => {
+  const params = new URLSearchParams(window.location.search);
+  const uploadedSkin = params.get('uploaded');
+  const username = params.get('username') ?? 'iiShator';
+
+  let baseSkinUrl = uploadedSkin ? `https://laced-heavy-brownie.glitch.me${uploadedSkin}` : `https://mc-heads.net/skin/${username}`;
+
+  if (!currentOverlayId) {
+    alert('No overlay applied!');
+    return;
+  }
+
+  const overlayUrl = `./overlays/${currentOverlayId}.png`;
+  overlayImages(baseSkinUrl, overlayUrl).then((resultingSkin) => {
+    const link = document.createElement('a');
+    link.href = resultingSkin;
+    link.download = 'skin_with_overlay.png';
+    link.click();
+  });
+});
+
+// Convert data URL to Blob
+function dataURLtoBlob(dataURL) {
+  const parts = dataURL.split(',');
+  const byteString = atob(parts[1]);
+  const mimeString = parts[0].split(':')[1].split(';')[0];
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new Blob([ab], { type: mimeString });
+}
+
+// Combine the skin and overlay into one image
+async function overlayImages(backgroundImageUrl, overlayImageUrl) {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    canvas.style.display = 'none';
+    document.body.appendChild(canvas);
+
+    const backgroundImg = new Image();
+    backgroundImg.crossOrigin = 'Anonymous';
+    backgroundImg.src = backgroundImageUrl;
+
+    const overlayImg = new Image();
+    overlayImg.crossOrigin = 'Anonymous';
+    overlayImg.src = overlayImageUrl;
+
+    Promise.all([
+      new Promise((res) => (backgroundImg.onload = res)),
+      new Promise((res) => (overlayImg.onload = res)),
+    ]).then(() => {
+      canvas.width = backgroundImg.width;
+      canvas.height = backgroundImg.height;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.drawImage(backgroundImg, 0, 0);
+      ctx.drawImage(overlayImg, 0, 0, overlayImg.width, overlayImg.height);
+
+      const base64 = canvas.toDataURL('image/png');
+      document.body.removeChild(canvas);
+      resolve(base64);
+    });
+  });
+}
+
+// Define the custom element for rendering skins inside cards
+customElements.define('astro-render', SkinRenderer);
+
+// Add file upload event listener
+document.getElementById('skin-upload')?.addEventListener('change', function(event) {
+  const renderer = document.querySelector('astro-render');
+  if (renderer) {
+    renderer.handleFileUpload(event);
+  }
+});
+</script>
+
+<style>
+  /* Styling for pagination buttons */
+  .pagination-btn {
+    cursor: pointer;
+    transition: background-color 0.3s;
+    margin: 0 5px;
+    padding: 8px 16px;
+    border-radius: 5px;
+    background-color: #e0e0e0;
+  }
+
+  .pagination-btn.active {
+    background-color: #007bff;
+    color: white;
+  }
+
+  .pagination-btn:hover {
+    background-color: #007bff;
+    color: white;
+  }
+</style>

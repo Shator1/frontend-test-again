@@ -1,0 +1,33 @@
+--- 
+interface Props {
+	title: string;
+	path: string;
+}
+
+const { title, path = "." } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="description" content="Astro description">
+		<meta name="viewport" content="width=device-width" />
+		<link rel="icon" type="image/svg+xml" href={`https://cdn.glitch.global/89fcef82-41a8-4a32-bcf5-f37756d28042/logo.svg?v=1726979996647`} />
+		<meta name="generator" content={Astro.generator} />
+		<title>{title}</title>
+		<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+	</head>
+	<body class="" >
+		<slot />
+	</body>
+</html>
+<style is:global>
+	html {
+		outline: none !important;
+		-webkit-tap-highlight-color: transparent; /* Remove the tap highlight on mobile */
+		background: #141F23;
+		background-size: 224px;
+	}
+</style>
